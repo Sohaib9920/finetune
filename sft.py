@@ -20,7 +20,7 @@ def main():
     ###############
     # Load datasets
     ###############
-    raw_datasets = get_datasets(data_config, splits=data_config.dataset_splits)
+    raw_datasets = get_datasets(data_config)
 
     ################
     # Load tokenizer
