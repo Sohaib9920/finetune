@@ -7,7 +7,6 @@ from src.utils import (
     apply_chat_template
 )
 import sys
-from peft import get_peft_model
 import torch
 
 torch.backends.cuda.enable_mem_efficient_sdp(True)
@@ -59,17 +58,6 @@ def main():
 
     model = AutoModelForCausalLM.from_pretrained(model_config.model_name_or_path, **model_kwargs)
 
-    if peft_config:
-
-        gradient_checkpointing_kwargs = getattr(sft_config, "gradient_checkpointing_kwargs", None) or {}
-        if getattr(sft_config, "gradient_checkpointing", False) and (
-            "use_reentrant" not in gradient_checkpointing_kwargs
-            or gradient_checkpointing_kwargs["use_reentrant"]
-        ):
-            model.enable_input_require_grads()
-
-        model = get_peft_model(model, peft_config)
-
     ########################
     # Initialize the Trainer
     ########################
@@ -78,7 +66,8 @@ def main():
         args=sft_config,
         train_dataset=train_dataset if sft_config.do_train else None,
         eval_dataset=eval_dataset if sft_config.do_eval else None,
-        tokenizer=tokenizer
+        tokenizer=tokenizer,
+        peft_config=peft_config
     )
 
     trainer.train()
