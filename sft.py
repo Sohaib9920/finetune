@@ -10,6 +10,10 @@ import sys
 from peft import get_peft_model
 import torch
 
+torch.backends.cuda.enable_mem_efficient_sdp(True)
+torch.backends.cuda.enable_flash_sdp(False)
+torch.backends.cuda.enable_math_sdp(False)
+
 def main():
 
     parser = HfArgumentParser((DataConfig, ModelConfig, SFTConfig))
