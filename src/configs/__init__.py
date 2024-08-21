@@ -1,1 +1,1 @@
-from .data_config import DataConfig
+from .data import DataConfig

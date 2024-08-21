@@ -40,3 +40,5 @@ class DataConfig:
     )
 
     chat_template: Optional[str] = field(default=None, metadata={"help": "The chat template to use."})
+
+    subsample_seed: Optional[int] = field(default=42, metadata={"help": "Random seed before subsampling train data"})

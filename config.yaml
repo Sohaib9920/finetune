@@ -1,6 +1,6 @@
 # data_config
 dataset_mixer:
-  AI-MO/NuminaMath-CoT: 0.001
+  AI-MO/NuminaMath-CoT: 0.0001
 dataset_splits:
 - train
 - test
@@ -19,6 +19,7 @@ load_in_8bit: true
 # sft_config
 output_dir: output
 packing: true
+dataset_text_field: text
 gradient_checkpointing: true
 gradient_checkpointing_kwargs:
   use_reentrant: True

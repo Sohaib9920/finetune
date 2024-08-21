@@ -22,14 +22,18 @@ def main():
     set_seed(sft_config.seed) 
 
     ###############
-    # Load datasets
+    # Prepare dataset
     ###############
     raw_datasets = get_datasets(data_config)
-
-    ################
-    # Load tokenizer
-    ################
     tokenizer = get_tokenizer(model_config, data_config, set_pad_token=sft_config.packing) # safe to set pad=eos when packing
+    raw_datasets = raw_datasets.map(apply_chat_template, fn_kwargs={"tokenizer": tokenizer, "task": "sft"})
+
+    train_dataset = raw_datasets["train"]
+    eval_dataset = raw_datasets["test"]
+
+    for ex in train_dataset.select(range(2)):
+        print(ex["text"])
+        print("-"*80)
 
     #######################
     # Load pretrained model
@@ -66,14 +70,6 @@ def main():
 
         model = get_peft_model(model, peft_config)
 
-    #####################
-    # Apply chat template
-    #####################
-    raw_datasets = raw_datasets.map(apply_chat_template, fn_kwargs={"tokenizer": tokenizer, "task": "sft"})
-
-    train_dataset = raw_datasets["train"]
-    eval_dataset = raw_datasets["test"]
-
     ########################
     # Initialize the Trainer
     ########################
@@ -86,6 +82,11 @@ def main():
     )
 
     trainer.train()
+
+    # Print CUDA memory statistics
+    print(f"Memory Allocated: {torch.cuda.memory_allocated() / 1e6:.2f} MB")
+    print(f"Max Memory Allocated: {torch.cuda.max_memory_allocated() / 1e6:.2f} MB")
+    print(f"Max Memory Reserved: {torch.cuda.max_memory_reserved() / 1e6:.2f} MB")
 
 
 if __name__ == "__main__":

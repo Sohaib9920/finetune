@@ -9,8 +9,7 @@ COLUMNS_TO_KEEP = ["messages", "chosen", "rejected", "prompt", "completion", "la
 DEFAULT_CHAT_TEMPLATE = "{% if not add_generation_prompt is defined %}{% set add_generation_prompt = false %}{% endif %}{% for message in messages %}{{'<|im_start|>' + message['role'] + '\n' + message['content'] + '<|im_end|>' + '\n'}}{% endfor %}{% if add_generation_prompt %}{{ '<|im_start|>assistant\n' }}{% endif %}"
 
 def get_datasets(
-    data_config: DataConfig,
-    shuffle: bool = True
+    data_config: DataConfig
 ) -> DatasetDict:
     """
     Loads one or more datasets with varying training set proportions.
@@ -18,8 +17,6 @@ def get_datasets(
     Args:
         data_config (`DataConfig`):
             Dataset configuration containing information about `dataset_mixer`, `dataset_split` and `shuffle`
-        shuffle (`bool`, *optional*, defaults to `True`):
-            Whether to shuffle the training data.
     Returns:
         [`DatasetDict`]: The dataset dictionary containing the loaded datasets.
     """
@@ -32,6 +29,7 @@ def get_datasets(
     dataset_mixer = data_config.dataset_mixer
     splits = data_config.dataset_splits
     revision = "main"
+    subsample_seed = data_config.subsample_seed
 
     for ds, frac_or_dict in dataset_mixer.items():
 
@@ -84,18 +82,13 @@ def get_datasets(
     if len(raw_train_datasets) > 0:
         train_subsets = []
         for frac, train_ds in zip(fracs, raw_train_datasets):
-            train_subset = train_ds.select(range(int(frac * len(train_ds))))
+            train_subset = train_ds.shuffle(seed=subsample_seed).select(range(int(frac * len(train_ds))))
             train_subsets.append(train_subset)
-        if shuffle:
-            raw_datasets["train"] = concatenate_datasets(train_subsets).shuffle(seed=42)
-        else:
-            raw_datasets["train"] = concatenate_datasets(train_subsets)
+        
+        raw_datasets["train"] = concatenate_datasets(train_subsets)
 
     if len(raw_val_datasets) > 0:
-        if shuffle:
-            raw_datasets["test"] = concatenate_datasets(raw_val_datasets).shuffle(seed=42)
-        else:
-            raw_datasets["test"] = concatenate_datasets(raw_val_datasets) 
+        raw_datasets["test"] = concatenate_datasets(raw_val_datasets) 
     
     if len(raw_datasets) == 0:
         raise ValueError(
