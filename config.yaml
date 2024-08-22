@@ -33,3 +33,6 @@ logging_steps: 20
 eval_strategy: steps
 num_train_epochs: 1
 eval_steps: 20
+
+# utils_config
+sdpa_kernel: math
