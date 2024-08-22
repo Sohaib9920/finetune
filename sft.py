@@ -1,6 +1,6 @@
 from transformers import HfArgumentParser, set_seed, AutoModelForCausalLM
 from trl import ModelConfig, SFTConfig, SFTTrainer, get_quantization_config, get_peft_config, get_kbit_device_map
-from src.configs import DataConfig
+from src.configs import DataConfig, UtilsConfig
 from src.utils import (
     get_datasets,
     get_tokenizer,
@@ -10,14 +10,17 @@ import sys
 from peft import get_peft_model
 import torch
 
-torch.backends.cuda.enable_mem_efficient_sdp(True)
-torch.backends.cuda.enable_flash_sdp(False)
-torch.backends.cuda.enable_math_sdp(False)
 
 def main():
 
-    parser = HfArgumentParser((DataConfig, ModelConfig, SFTConfig))
-    data_config, model_config, sft_config = parser.parse_yaml_file(sys.argv[1])
+    parser = HfArgumentParser((DataConfig, ModelConfig, SFTConfig, UtilsConfig))
+    data_config, model_config, sft_config, utils_config = parser.parse_yaml_file(sys.argv[1])
+
+    sdpa_kernel = utils_config.sdpa_kernel
+    if sdpa_kernel is not None:
+        torch.backends.cuda.enable_mem_efficient_sdp(sdpa_kernel == "mem")
+        torch.backends.cuda.enable_flash_sdp(sdpa_kernel == "flash")
+        torch.backends.cuda.enable_math_sdp(sdpa_kernel == "math")
 
     set_seed(sft_config.seed) 
 
