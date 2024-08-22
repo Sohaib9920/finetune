@@ -74,6 +74,7 @@ def main():
     )
 
     trainer.train()
+    print(trainer.evaluate())
 
     # Print CUDA memory statistics
     print(f"Memory Allocated: {torch.cuda.memory_allocated() / 1e6:.2f} MB")
