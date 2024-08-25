@@ -39,10 +39,10 @@ def main():
     )
     log_level = sft_config.get_process_log_level() # can set different log level for main process and replicas
     logger.setLevel(log_level)
-    print(log_level, logger)
     datasets.utils.logging.set_verbosity(log_level)
-    transformers.utils.logging.set_verbosity(log_level)
-    transformers.utils.logging.enable_default_handler()
+    # `transformers` logger having propagate=False and stderr StreamHandler with explicit Formatter. 
+    # It will be parent of child loggers i.e `transformers.trainer` having propagate=True hence share its handlers to children
+    transformers.utils.logging.set_verbosity(log_level) 
     transformers.utils.logging.enable_explicit_format()
 
     logger.warning(
@@ -61,7 +61,8 @@ def main():
     #################
     raw_datasets = get_datasets(data_config)
     tokenizer = get_tokenizer(model_config, data_config, set_pad_token=sft_config.packing) # safe to set pad=eos when packing
-    raw_datasets = raw_datasets.map(apply_chat_template, fn_kwargs={"tokenizer": tokenizer, "task": "sft"})
+    with sft_config.main_process_first(desc="Applying chat_template to `messages` column"):
+        raw_datasets = raw_datasets.map(apply_chat_template, fn_kwargs={"tokenizer": tokenizer, "task": "sft"})
 
     train_dataset = raw_datasets.get("train")
     eval_dataset = raw_datasets.get("test")
@@ -154,7 +155,7 @@ def main():
             "dataset_tags": list(data_config.dataset_mixer.keys()),
         }
         logger.info("Pushing to hub...")
-        # do save_model, create_model_card and then push everything inside output_dir (excluding _* and checkpoint-*) to 
+        # do `save_model`, `create_model_card` and then push everything inside output_dir (excluding _* and checkpoint-*) to 
         # hub_model_id, all on main process
         trainer.push_to_hub(**kwargs) 
 

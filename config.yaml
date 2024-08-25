@@ -7,20 +7,20 @@ dataset_splits:
 chat_template: "{% for message in messages %}{% if (message['role'] == 'system')%}{{ '' }}{% elif (message['role'] == 'user')%}{{ '### Problem: ' + message['content'] + '\n' }}{% elif (message['role'] == 'assistant')%}{{ '### Solution: ' + message['content'] + '\n' }}{% endif %}{% if loop.last and message['role'] == 'user' and add_generation_prompt %}{{ '### Solution: ' }}{% endif %}{% endfor %}"
 
 # model_config
-model_name_or_path: deepseek-ai/deepseek-math-7b-base
-torch_dtype: float16
+model_name_or_path: openai-community/gpt2 # deepseek-ai/deepseek-math-7b-base
+torch_dtype: float16 # bfloat16
 model_revision: main
 trust_remote_code: true
 attn_implementation: sdpa
 use_peft: true
-load_in_4bit: true
+load_in_4bit: false # true
 lora_target_modules: all-linear
 
 # sft_config
 output_dir: output
 
 packing: true
-max_seq_length: 2048
+max_seq_length: 512 # 2048
 dataset_text_field: text
 
 do_train: true
@@ -45,8 +45,8 @@ warmup_ratio: 0.
 report_to: none
 logging_strategy: steps
 logging_steps: 1
-log_level: passive
-log_level_replica: passive
+log_level: info
+log_level_replica: warning
 
 eval_strategy: steps
 eval_steps: 0.249
@@ -58,4 +58,4 @@ hub_model_id: my_model
 
 save_strategy: "no"
 
-sdpa_kernel: mem
+sdpa_kernel: math # mem
