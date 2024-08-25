@@ -1,3 +1,7 @@
+import sys
+import torch
+import logging
+import math
 from transformers import HfArgumentParser, set_seed, AutoModelForCausalLM
 from trl import ModelConfig, SFTTrainer, get_quantization_config, get_peft_config, get_kbit_device_map
 from src.configs import DataConfig, SFTConfig
@@ -5,14 +9,9 @@ from src.utils import (
     get_datasets,
     get_tokenizer,
     apply_chat_template,
-    hf_login
+    hf_login,
+    setup_logging
 )
-import sys
-import torch
-import logging
-import math
-import datasets
-import transformers
 
 logger = logging.getLogger(__name__) # globaly available logger of this module
 
@@ -32,18 +31,8 @@ def main():
     ###############
     # Setup logging
     ###############
-    logging.basicConfig(
-        format="[%(levelname)s|%(filename)s:%(lineno)s] %(asctime)s >> %(message)s", # explicit format
-        handlers=[logging.StreamHandler(sys.stdout)],
-    )
-    log_level = sft_config.get_process_log_level() # can set different log level for main process and replicas
-    logger.setLevel(log_level)
-    # datasets logger with propagate=True, using root handlers
-    datasets.utils.logging.set_verbosity(log_level)
-    # `transformers` logger having propagate=False and its own stderr StreamHandler with explicit Formatter. 
-    # It will be parent of child loggers i.e `transformers.trainer` having propagate=True hence share its handlers to children
-    transformers.utils.logging.set_verbosity(log_level) 
-    transformers.utils.logging.enable_explicit_format()
+
+    setup_logging(sft_config)
 
     logger.warning(
         f"Process rank: {sft_config.local_rank}, device: {sft_config.device}, n_gpu: {sft_config.n_gpu}"
