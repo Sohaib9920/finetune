@@ -13,26 +13,49 @@ model_revision: main
 trust_remote_code: true
 attn_implementation: sdpa
 use_peft: true
-load_in_8bit: true
-
+load_in_4bit: true
+lora_target_modules: all-linear
 
 # sft_config
 output_dir: output
+
 packing: true
+max_seq_length: 2048
 dataset_text_field: text
-gradient_checkpointing: true
-gradient_checkpointing_kwargs:
-  use_reentrant: True
+
 do_train: true
 do_eval: true
-max_seq_length: 512
-report_to: none
+
+gradient_checkpointing: true
+gradient_checkpointing_kwargs:
+  use_reentrant: False
+
+gradient_accumulation_steps: 1
 per_device_train_batch_size: 1
 per_device_eval_batch_size: 2
-logging_steps: 20
-eval_strategy: steps
 num_train_epochs: 1
-eval_steps: 20
 
-# utils_config
-sdpa_kernel: math
+fp16: true
+seed: 42
+
+learning_rate: 2.0e-05
+lr_scheduler_type: cosine
+warmup_ratio: 0.
+
+report_to: none
+logging_strategy: steps
+logging_steps: 1
+log_level: passive
+log_level_replica: passive
+
+eval_strategy: steps
+eval_steps: 0.249
+
+push_to_hub: true
+hub_private_repo: true
+hub_strategy: every_save
+hub_model_id: my_model
+
+save_strategy: "no"
+
+sdpa_kernel: mem

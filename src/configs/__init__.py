@@ -1,2 +1,2 @@
 from .data import DataConfig
-from .utils import UtilsConfig
+from .sft import SFTConfig
