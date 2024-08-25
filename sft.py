@@ -11,6 +11,8 @@ import sys
 import torch
 import logging
 import math
+import datasets
+import transformers
 
 logger = logging.getLogger(__name__) # globaly available logger of this module
 
@@ -37,6 +39,11 @@ def main():
     )
     log_level = sft_config.get_process_log_level() # can set different log level for main process and replicas
     logger.setLevel(log_level)
+    print(log_level, logger)
+    datasets.utils.logging.set_verbosity(log_level)
+    transformers.utils.logging.set_verbosity(log_level)
+    transformers.utils.logging.enable_default_handler()
+    transformers.utils.logging.enable_explicit_format()
 
     logger.warning(
         f"Process rank: {sft_config.local_rank}, device: {sft_config.device}, n_gpu: {sft_config.n_gpu}"
