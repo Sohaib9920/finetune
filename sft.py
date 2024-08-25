@@ -33,14 +33,14 @@ def main():
     # Setup logging
     ###############
     logging.basicConfig(
-        format="%(asctime)s - %(levelname)s - %(name)s - %(message)s",
-        datefmt="%Y-%m-%d %H:%M:%S",
+        format="[%(levelname)s|%(filename)s:%(lineno)s] %(asctime)s >> %(message)s", # explicit format
         handlers=[logging.StreamHandler(sys.stdout)],
     )
     log_level = sft_config.get_process_log_level() # can set different log level for main process and replicas
     logger.setLevel(log_level)
+    # datasets logger with propagate=True, using root handlers
     datasets.utils.logging.set_verbosity(log_level)
-    # `transformers` logger having propagate=False and stderr StreamHandler with explicit Formatter. 
+    # `transformers` logger having propagate=False and its own stderr StreamHandler with explicit Formatter. 
     # It will be parent of child loggers i.e `transformers.trainer` having propagate=True hence share its handlers to children
     transformers.utils.logging.set_verbosity(log_level) 
     transformers.utils.logging.enable_explicit_format()
