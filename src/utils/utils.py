@@ -50,16 +50,3 @@ def setup_logging(sft_config):
     datasets_handler.handlers = []
     datasets_handler.setLevel(log_level)
     datasets_handler.propagate = True
-
-
-def init_wandb_training(sft_config):
-    """
-    Helper function for setting up Weights & Biases logging tools.
-    Setup wandb environment variables that will automatically be passed to `wandb.init()`
-    """
-    os.environ["WANDB_PROJECT"] = sft_config.wandb_project
-    os.environ["WANDB_RUN_GROUP"] = sft_config.wandb_run_group
-    if sft_config.wandb_run_id is not None:
-        os.environ["WANDB_RUN_ID"] = sft_config.wandb_run_id
-    if sft_config.wandb_tags is not None:
-        os.environ["WANDB_TAGS"] = ",".join(sft_config.wandb_tags)
