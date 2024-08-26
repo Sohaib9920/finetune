@@ -4,12 +4,23 @@ import logging
 import sys
 
 
-def hf_login():
+def hf_login(required=False):
     """Login to HuggingFace Hub if HF_TOKEN is defined in the environment"""
     hf_token = os.getenv("HF_TOKEN")
-    if hf_token is not None:
+    if required and hf_token is None:
+        raise ValueError("HF_TOKEN is required but not found in the environment variables.")
+    elif hf_token is not None:
         login(token=hf_token)
 
+
+def init_wandb_training(wandb_config):
+    """
+    Setup wandb environment variables so that `wandb.init()` uses them inside `WandbCallback` setup. 
+    """
+    if wandb_config is not None:
+        for k,v in wandb_config.items():
+            os.environ[k] = v
+            
 
 def setup_logging(sft_config):
     """
@@ -39,3 +50,16 @@ def setup_logging(sft_config):
     datasets_handler.handlers = []
     datasets_handler.setLevel(log_level)
     datasets_handler.propagate = True
+
+
+def init_wandb_training(sft_config):
+    """
+    Helper function for setting up Weights & Biases logging tools.
+    Setup wandb environment variables that will automatically be passed to `wandb.init()`
+    """
+    os.environ["WANDB_PROJECT"] = sft_config.wandb_project
+    os.environ["WANDB_RUN_GROUP"] = sft_config.wandb_run_group
+    if sft_config.wandb_run_id is not None:
+        os.environ["WANDB_RUN_ID"] = sft_config.wandb_run_id
+    if sft_config.wandb_tags is not None:
+        os.environ["WANDB_TAGS"] = ",".join(sft_config.wandb_tags)

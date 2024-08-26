@@ -10,7 +10,8 @@ from src.utils import (
     get_tokenizer,
     apply_chat_template,
     hf_login,
-    setup_logging
+    setup_logging,
+    init_wandb_training
 )
 
 logger = logging.getLogger(__name__) # globaly available logger of this module
@@ -28,9 +29,9 @@ def main():
 
     set_seed(sft_config.seed)
 
-    ###############
-    # Setup logging
-    ###############
+    ########
+    # Setup
+    ########
 
     setup_logging(sft_config)
 
@@ -43,7 +44,11 @@ def main():
     logger.info(f"Training/evaluation parameters {sft_config}")
 
     # Login to HuggingFace Hub if needed
-    hf_login()
+    hf_login(required=(sft_config.push_to_hub is True))
+
+    # Setup WandB
+    if "wandb" in sft_config.report_to:
+        init_wandb_training(sft_config.wandb_config)
 
     #################
     # Prepare dataset
@@ -133,21 +138,28 @@ def main():
     ##################################
     # Save model and create model card
     ##################################
+    logger.info("*** Save model ***")
     trainer.model.config.use_cache = True # Restore k,v cache for fast inference
     if trainer.is_world_process_zero():
         trainer.model.config.save_pretrained(sft_config.output_dir)
 
+    kwargs = {
+        "finetuned_from": model_config.model_name_or_path,
+        "dataset": list(data_config.dataset_mixer.keys()),
+        "dataset_tags": list(data_config.dataset_mixer.keys()),
+    }
+
     if sft_config.push_to_hub is True:
-        kwargs = {
-            "finetuned_from": model_config.model_name_or_path,
-            "dataset": list(data_config.dataset_mixer.keys()),
-            "dataset_tags": list(data_config.dataset_mixer.keys()),
-        }
         logger.info("Pushing to hub...")
         # do `save_model`, `create_model_card` and then push everything inside output_dir (excluding _* and checkpoint-*) to 
         # hub_model_id, all on main process
-        trainer.push_to_hub(**kwargs) 
+        trainer.push_to_hub(**kwargs)
 
+    else:
+        # Both run on main_process
+        trainer.save_model() 
+        trainer.create_model_card(**kwargs)
+        logger.info(f"Model saved to {sft_config.output_dir}")
 
 if __name__ == "__main__":
     main()
