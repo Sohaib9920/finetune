@@ -20,7 +20,7 @@ def init_wandb_training(wandb_config):
     if wandb_config is not None:
         for k,v in wandb_config.items():
             os.environ[k] = v
-            
+
 
 def setup_logging(sft_config):
     """
@@ -29,6 +29,7 @@ def setup_logging(sft_config):
     `propagate=True` so that they use root logger handler. Their child loggers like `transformers.trainer` will
     also use the same handles.
     The log_level for main process and replica can be controlled using `log_level` and `log_level_replica` args of sft_conig resp.
+    It's better to run this function in `main()` after all imports because new imports may change loggers like transformers.
     """
 
     log_level = sft_config.get_process_log_level() 
@@ -41,12 +42,15 @@ def setup_logging(sft_config):
     main_module_logger = logging.getLogger("__main__")
     main_module_logger.setLevel(log_level)
 
-    transformers_handler = logging.getLogger("transformers")
-    transformers_handler.handlers = []
-    transformers_handler.setLevel(log_level)
-    transformers_handler.propagate = True
+    transformers_logger = logging.getLogger("transformers")
+    transformers_logger.handlers = []
+    transformers_logger.setLevel(log_level)
+    transformers_logger.propagate = True
 
-    datasets_handler = logging.getLogger("datasets")
-    datasets_handler.handlers = []
-    datasets_handler.setLevel(log_level)
-    datasets_handler.propagate = True
+    datasets_logger = logging.getLogger("datasets")
+    datasets_logger.handlers = []
+    datasets_logger.setLevel(log_level)
+    datasets_logger.propagate = True
+
+    src_logger = logging.getLogger("src")
+    src_logger.setLevel(log_level)

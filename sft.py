@@ -2,6 +2,7 @@ import sys
 import torch
 import logging
 import math
+import wandb
 from transformers import HfArgumentParser, set_seed, AutoModelForCausalLM
 from trl import ModelConfig, SFTTrainer, get_quantization_config, get_peft_config, get_kbit_device_map
 from src.configs import DataConfig, SFTConfig
@@ -21,6 +22,8 @@ def main():
     parser = HfArgumentParser((DataConfig, ModelConfig, SFTConfig))
     data_config, model_config, sft_config = parser.parse_yaml_file(sys.argv[1])
 
+    is_world_process_zero = sft_config.process_index == 0 # same as trainer do; get process index of args.distributed_state (PartialState)
+
     sdpa_kernel = sft_config.sdpa_kernel
     if sdpa_kernel is not None:
         torch.backends.cuda.enable_mem_efficient_sdp(sdpa_kernel == "mem")
@@ -35,6 +38,26 @@ def main():
 
     setup_logging(sft_config)
 
+    # Login to HuggingFace Hub if needed
+    hf_login(required=(sft_config.push_to_hub is True))
+
+    # Setup WandB
+    wandb_enabled = "wandb" in sft_config.report_to
+    if wandb_enabled:
+        init_wandb_training(sft_config.wandb_config)
+    
+    if wandb_enabled and is_world_process_zero:
+        # Initializing wandb eariler than WandbCallback.setup() in order to log stdout to wandb.
+        # Ignores trail_name in init. Now we set run_name using env variable and it is not overriden by args.run_name. Other than that its the same
+        wandb.init()
+        # wandb.config is updated by sft_config, model.config and model.peft_config in WandbCallback.setup() so no need to do manually
+        # wandb logging working:
+        # trainer uses `log()` method everytime which first add current epoch and step to log and then append the updated log to trainer_state log_history.
+        # Then it gives these logs to WandbCallback.on_log(). On main process: If metric key is one of train_result then add it as summary metric. 
+        # Otherwise, convert keys "eval_{metric}" to "eval/{metric}", "test_{metric}" to "test/{metric}", "train_{metric}" and "{metric}" to "train/{metric}"
+        # Then add "train/global_step" to log which is default x-axis added in `setup()` using `wandb.define_metric("train/global_step")`
+        # Then simply `wandb.log()`
+
     logger.warning(
         f"Process rank: {sft_config.local_rank}, device: {sft_config.device}, n_gpu: {sft_config.n_gpu}"
         + f" distributed training: {bool(sft_config.local_rank != -1)}, 16-bits training: {sft_config.fp16 or sft_config.bf16}"
@@ -42,13 +65,6 @@ def main():
     logger.info(f"Model parameters {model_config}")
     logger.info(f"Data parameters {data_config}")
     logger.info(f"Training/evaluation parameters {sft_config}")
-
-    # Login to HuggingFace Hub if needed
-    hf_login(required=(sft_config.push_to_hub is True))
-
-    # Setup WandB
-    if "wandb" in sft_config.report_to:
-        init_wandb_training(sft_config.wandb_config)
 
     #################
     # Prepare dataset
@@ -61,14 +77,21 @@ def main():
     train_dataset = raw_datasets.get("train")
     eval_dataset = raw_datasets.get("test")
 
-    logger.info(f"Train dataset size: {len(train_dataset) if train_dataset is not None else 0}")
-    logger.info(f"Evaluation dataset size: {len(eval_dataset) if eval_dataset is not None else 0}")
+    raw_train_examples = len(train_dataset) if train_dataset is not None else 0
+    raw_eval_examples = len(eval_dataset) if eval_dataset is not None else 0
+    
+    logger.info(f"Raw Train Examples: {raw_train_examples}")
+    logger.info(f"Raw Eval Examples: {raw_eval_examples}")
 
-    if train_dataset is not None:
+    if wandb_enabled and is_world_process_zero:
+        wandb.run.summary["raw_train_examples"] = raw_train_examples
+        wandb.run.summary["raw_eval_examples"] = raw_eval_examples
+
+    if raw_train_examples > 0:
         for ex in train_dataset.select(range(2)):
             logger.info(f"Training example:\n\n{ex['text']}\n")
     
-    if eval_dataset is not None:
+    if raw_eval_examples > 0:
         for ex in eval_dataset.select(range(2)):
             logger.info(f"Evaluation example:\n\n{ex['text']}\n")
 
@@ -94,7 +117,7 @@ def main():
         quantization_config=quantization_config,
     )
 
-    model = AutoModelForCausalLM.from_pretrained(model_config.model_name_or_path, **model_kwargs) # runs on main_procss, use cache for other
+    model = AutoModelForCausalLM.from_pretrained(model_config.model_name_or_path, **model_kwargs) # download weights on main_procss, use cache for other
 
     ########################
     # Initialize the Trainer
@@ -108,6 +131,13 @@ def main():
         peft_config=peft_config
     )
 
+    train_examples = len(trainer.train_dataset) if trainer.train_dataset is not None else 0
+    eval_examples = len(trainer.eval_dataset) if trainer.eval_dataset is not None else 0
+
+    if wandb_enabled and is_world_process_zero:
+        wandb.run.summary["train_examples"] = train_examples
+        wandb.run.summary["eval_examples"] = eval_examples
+
     ###############
     # Training loop
     ###############
@@ -115,10 +145,11 @@ def main():
         logger.info("*** Train ***")
         train_result = trainer.train()
         metrics = train_result.metrics
-        metrics["train_samples"] = len(train_dataset)
-        trainer.log_metrics("train", metrics)
-        trainer.save_metrics("train", metrics)
-        trainer.save_state()
+        metrics["raw_train_examples"] = raw_train_examples
+        metrics["train_examples"] = train_examples
+        trainer.log_metrics("train", metrics) # only print formatted metrics on main_process. Does not log to wandb
+        trainer.save_metrics("train", metrics) # just save metrics to {split}.json and updated combined metrics to all_results.json on main_process
+        # trainer has already logged the train_result.metrics to wandb as summary metrics 
     
     ##########
     # Evaluate
@@ -134,10 +165,16 @@ def main():
         metrics["perplexity"] = perplexity
         trainer.log_metrics("eval", metrics)
         trainer.save_metrics("eval", metrics)
+        # trainer already logged the evaluate result like usual. Extras added manually as summary metrics
+
+        if wandb_enabled and is_world_process_zero:
+            wandb.run.summary["perplexity"] = perplexity
+
     
     ##################################
     # Save model and create model card
     ##################################
+    trainer.save_state() # saving state AFTER all the logging added to log_history of trainer_state
     logger.info("*** Save model ***")
     trainer.model.config.use_cache = True # Restore k,v cache for fast inference
     if trainer.is_world_process_zero():
