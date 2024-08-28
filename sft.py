@@ -108,6 +108,8 @@ def main():
 
     quantization_config = get_quantization_config(model_config)
     peft_config = get_peft_config(model_config)
+    if quantization_config is not None and sft_config.fp16:
+        quantization_config.bnb_4bit_compute_dtype = torch.float16
 
     model_kwargs = dict(
         revision=model_config.model_revision,
