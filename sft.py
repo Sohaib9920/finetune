@@ -125,34 +125,7 @@ def main():
         model = AutoModelForCausalLM.from_config(config=config, torch_dtype=torch_dtype, attn_implementation=model_config.attn_implementation)
     else:
         model = AutoModelForCausalLM.from_pretrained(model_config.model_name_or_path, **model_kwargs) # download weights on main_procss, use cache for other
-
-    ########################
-    # Preparing PEFT Model
-    ########################
-    if peft_config is not None:
-        if sft_config.gradient_checkpointing and (
-            sft_config.gradient_checkpointing_kwargs is None 
-            or sft_config.gradient_checkpointing_kwargs.get("use_reentrant", True)
-        ): # If gc is enabled and gc kwargs are not provided or provided but use_reentrant is either True or not present then:
-            # create a hook that make inputs of decoder layer (i.e embedding output) requires grad as `use_reentrant = True`
-            # requires atleast one input to `checkpoint()` to must have requires_grad=True which is not true by default when
-            # using peft
-            model.enable_input_require_grads() 
-            # Trainer will enable checkpointing using `model.gradient_checkpointing_enable(gradient_checkpointing_kwargs)`
-            # This function simply provides `_gradient_checkpointing_func` which is `partial(checkpoint, **gradient_checkpointing_kwargs)` 
-            # to all the modules of model having `gradient_checkpointing` attribute i.e LlamaModel. 
-            # If gradient_checkpointing_kwargs was None or use_reentrant is not present then use_reentrant=True is used by default.
     
-        model = get_peft_model(model, peft_config)
-        # creating peft model outside of SFTTrainer in order to avoid unnecassary initial upcasting of embedding and lm_head to float32
-        # done by `prepare_model_for_kbit_training` when using quantization. It is done so that layernorm weights are float32 and training is stable.
-        # For bf16=True and 4-bit quant, trainer safely downcast embedding and lm_head to bfloat16 while layernorm remain at float32. 
-        # Problems:
-        # 1) ~2GB extra memory is allocated at first that can cause OOM
-        # 2) For float16 and 8-bit quant, embedding and lm_head are not downcasted when fp16=True. Why not?
-        # For Llama 4-bit LORA, using half model gives huge memory savings, little speedup and same train/val loss.
-    
-
     ########################
     # Initialize the Trainer
     ########################
@@ -162,6 +135,7 @@ def main():
         train_dataset=train_dataset if sft_config.do_train else None,
         eval_dataset=eval_dataset if sft_config.do_eval else None,
         tokenizer=tokenizer,
+        peft_config=peft_config
     )
 
     ##########################################
@@ -215,22 +189,6 @@ def main():
 
         if log_wandb:
             wandb.run.summary["perplexity"] = perplexity
-
-    ###############################
-    # Log Memory allocation details
-    ###############################
-    memory_allocated = torch.cuda.memory_allocated()
-    max_memory_allocated = torch.cuda.max_memory_allocated()
-    max_memory_reserved = torch.cuda.max_memory_reserved()
-
-    logger.info(f"Memory Allocated: {memory_allocated / (1024**2):.2f} MB")
-    logger.info(f"Max Memory Allocated: {max_memory_allocated / (1024**2):.2f} MB")
-    logger.info(f"Max Memory Reserved: {max_memory_reserved / (1024**2):.2f} MB")
-
-    if log_wandb:
-        wandb.run.summary["memory_allocated"] = memory_allocated
-        wandb.run.summary["max_memory_allocated"] = max_memory_allocated
-        wandb.run.summary["max_memory_reserved"] = max_memory_reserved
     
     ##################################
     # Save model and create model card
