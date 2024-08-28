@@ -2,10 +2,13 @@ import sys
 import torch
 import logging
 import math
+from tabulate import tabulate
 import wandb
-from transformers import HfArgumentParser, set_seed, AutoModelForCausalLM
+import torch
+from transformers import HfArgumentParser, set_seed, AutoModelForCausalLM, AutoConfig
 from trl import ModelConfig, SFTTrainer, get_quantization_config, get_peft_config, get_kbit_device_map
 from src.configs import DataConfig, SFTConfig
+from peft import get_peft_model
 from src.utils import (
     get_datasets,
     get_tokenizer,
@@ -22,7 +25,7 @@ def main():
     parser = HfArgumentParser((DataConfig, ModelConfig, SFTConfig))
     data_config, model_config, sft_config = parser.parse_yaml_file(sys.argv[1])
 
-    is_world_process_zero = sft_config.process_index == 0 # same as trainer do; get process index of args.distributed_state (PartialState)
+    is_world_process_zero = sft_config.process_index == 0 # same as trainer do; get process_index of args.distributed_state (PartialState)
 
     sdpa_kernel = sft_config.sdpa_kernel
     if sdpa_kernel is not None:
@@ -35,18 +38,17 @@ def main():
     ########
     # Setup
     ########
-
     setup_logging(sft_config)
 
     # Login to HuggingFace Hub if needed
     hf_login(required=(sft_config.push_to_hub is True))
 
     # Setup WandB
-    wandb_enabled = "wandb" in sft_config.report_to
-    if wandb_enabled:
-        init_wandb_training(sft_config.wandb_config)
+    log_wandb = ("wandb" in sft_config.report_to) and is_world_process_zero
+    if log_wandb:
+        init_wandb_training(sft_config.wandb_config) # must be before init
     
-    if wandb_enabled and is_world_process_zero:
+    if log_wandb:
         # Initializing wandb eariler than WandbCallback.setup() in order to log stdout to wandb.
         # Ignores trail_name in init. Now we set run_name using env variable and it is not overriden by args.run_name. Other than that its the same
         wandb.init()
@@ -83,7 +85,7 @@ def main():
     logger.info(f"Raw Train Examples: {raw_train_examples}")
     logger.info(f"Raw Eval Examples: {raw_eval_examples}")
 
-    if wandb_enabled and is_world_process_zero:
+    if log_wandb:
         wandb.run.summary["raw_train_examples"] = raw_train_examples
         wandb.run.summary["raw_eval_examples"] = raw_eval_examples
 
@@ -117,7 +119,32 @@ def main():
         quantization_config=quantization_config,
     )
 
-    model = AutoModelForCausalLM.from_pretrained(model_config.model_name_or_path, **model_kwargs) # download weights on main_procss, use cache for other
+    if sft_config.testing:
+        config = AutoConfig.from_pretrained(model_config.model_name_or_path)
+        config.num_hidden_layers = 2
+        model = AutoModelForCausalLM.from_config(config=config, torch_dtype=torch_dtype, attn_implementation=model_config.attn_implementation)
+    else:
+        model = AutoModelForCausalLM.from_pretrained(model_config.model_name_or_path, **model_kwargs) # download weights on main_procss, use cache for other
+
+    ########################
+    # Preparing PEFT Model
+    ########################
+    if peft_config is not None:
+        if sft_config.gradient_checkpointing and (
+            sft_config.gradient_checkpointing_kwargs is None 
+            or sft_config.gradient_checkpointing_kwargs.get("use_reentrant", True)
+        ): # If gc is enabled and gc kwargs are not provided or provided but use_reentrant is either True or not present then:
+            # create a hook that make inputs of decoder layer (i.e embedding output) requires grad as `use_reentrant = True`
+            # requires atleast one input to `checkpoint()` to must have requires_grad=True which is not true by default when
+            # using peft
+            model.enable_input_require_grads() 
+            # Trainer will enable checkpointing using `model.gradient_checkpointing_enable(gradient_checkpointing_kwargs)`
+            # This function simply provides `_gradient_checkpointing_func` which is `partial(checkpoint, **gradient_checkpointing_kwargs)` 
+            # to all the modules of model having `gradient_checkpointing` attribute i.e LlamaModel. 
+            # If gradient_checkpointing_kwargs was None or use_reentrant is not present then use_reentrant=True is used by default.
+    
+        model = get_peft_model(model, peft_config)
+    
 
     ########################
     # Initialize the Trainer
@@ -128,13 +155,25 @@ def main():
         train_dataset=train_dataset if sft_config.do_train else None,
         eval_dataset=eval_dataset if sft_config.do_eval else None,
         tokenizer=tokenizer,
-        peft_config=peft_config
     )
 
+    ##########################################
+    # Log processed data and model information
+    ##########################################
     train_examples = len(trainer.train_dataset) if trainer.train_dataset is not None else 0
     eval_examples = len(trainer.eval_dataset) if trainer.eval_dataset is not None else 0
 
-    if wandb_enabled and is_world_process_zero:
+    logger.info(f"Train Examples: {train_examples}")
+    logger.info(f"Eval Examples: {eval_examples}")
+
+    # Collect parameter information
+    param_info = []
+    for name, param in trainer.model.named_parameters():
+        param_info.append([name, param.dtype, param.requires_grad, param.__class__.__name__])
+    table = tabulate(param_info, headers=["Name", "Dtype", "Requires Grad", "Class Name"], tablefmt="grid")
+    logger.info(f"Model Parameters info:\n{table}")
+
+    if log_wandb:
         wandb.run.summary["train_examples"] = train_examples
         wandb.run.summary["eval_examples"] = eval_examples
 
@@ -167,9 +206,24 @@ def main():
         trainer.save_metrics("eval", metrics)
         # trainer already logged the evaluate result like usual. Extras added manually as summary metrics
 
-        if wandb_enabled and is_world_process_zero:
+        if log_wandb:
             wandb.run.summary["perplexity"] = perplexity
 
+    ###############################
+    # Log Memory allocation details
+    ###############################
+    memory_allocated = torch.cuda.memory_allocated()
+    max_memory_allocated = torch.cuda.max_memory_allocated()
+    max_memory_reserved = torch.cuda.max_memory_reserved()
+
+    logger.info(f"Memory Allocated: {memory_allocated / (1024**2):.2f} MB")
+    logger.info(f"Max Memory Allocated: {max_memory_allocated / (1024**2):.2f} MB")
+    logger.info(f"Max Memory Reserved: {max_memory_reserved / (1024**2):.2f} MB")
+
+    if log_wandb:
+        wandb.run.summary["memory_allocated"] = memory_allocated
+        wandb.run.summary["max_memory_allocated"] = max_memory_allocated
+        wandb.run.summary["max_memory_reserved"] = max_memory_reserved
     
     ##################################
     # Save model and create model card
