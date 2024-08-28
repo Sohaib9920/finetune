@@ -144,6 +144,13 @@ def main():
             # If gradient_checkpointing_kwargs was None or use_reentrant is not present then use_reentrant=True is used by default.
     
         model = get_peft_model(model, peft_config)
+        # creating peft model outside of SFTTrainer in order to avoid unnecassary initial upcasting of embedding and lm_head to float32
+        # done by `prepare_model_for_kbit_training` when using quantization. It is done so that layernorm weights are float32 and training is stable.
+        # For bf16=True and 4-bit quant, trainer safely downcast embedding and lm_head to bfloat16 while layernorm remain at float32. 
+        # Problems:
+        # 1) ~2GB extra memory is allocated at first that can cause OOM
+        # 2) For float16 and 8-bit quant, embedding and lm_head are not downcasted when fp16=True. Why not?
+        # For Llama 4-bit LORA, using half model gives huge memory savings, little speedup and same train/val loss.
     
 
     ########################
@@ -169,8 +176,8 @@ def main():
     # Collect parameter information
     param_info = []
     for name, param in trainer.model.named_parameters():
-        param_info.append([name, param.dtype, param.requires_grad, param.__class__.__name__])
-    table = tabulate(param_info, headers=["Name", "Dtype", "Requires Grad", "Class Name"], tablefmt="grid")
+        param_info.append([name, param.dtype, param.shape, param.requires_grad, param.__class__.__name__])
+    table = tabulate(param_info, headers=["Name", "Dtype", "Shape", "Requires Grad", "Class Name"], tablefmt="grid")
     logger.info(f"Model Parameters info:\n{table}")
 
     if log_wandb:
