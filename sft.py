@@ -138,6 +138,10 @@ def main():
         peft_config=peft_config
     )
 
+    # Trainer uses `prepare_model_for_kbit_training` to upcast all non-int8 params (layernorm, embedding and lm_head) to float32 
+    # just to have layernorm in float32 for stable qlora training. For mixed precion, we can safely downcast lm_head and embedding
+    # to save a lot of memory with same loss (atleast for Llama). Trainer do this for bf16 int4 qlora. We also do for fp16 int4 and int8:
+
     if (
         sft_config.bf16 or sft_config.fp16
         and (getattr(model, "is_loaded_in_4bit", False) or getattr(model, "is_loaded_in_4bit", False))
