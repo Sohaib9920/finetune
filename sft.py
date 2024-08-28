@@ -138,6 +138,15 @@ def main():
         peft_config=peft_config
     )
 
+    if (
+        sft_config.bf16 or sft_config.fp16
+        and (getattr(model, "is_loaded_in_4bit", False) or getattr(model, "is_loaded_in_4bit", False))
+    ):
+        dtype = torch.bfloat16 if sft_config.bf16 else torch.float16
+        for name, module in model.named_modules():
+            if any(x in name for x in ["lm_head", "embed_tokens", "wte", "wpe"]):
+                module = module.to(dtype)
+
     ##########################################
     # Log processed data and model information
     ##########################################
