@@ -103,7 +103,9 @@ def main():
         else getattr(torch, model_config.torch_dtype)
     )
 
-    quantization_config = get_quantization_config(model_config)
+    quantization_config = get_quantization_config(model_config) 
+    # bnb_4bit_compute_dtype is same as torch_dtype for consistency with model weights
+    # bnb_4bit_quant_storage is same as torch_dtype for fsdp support
     peft_config = get_peft_config(model_config)
 
     model_kwargs = dict(
@@ -135,9 +137,10 @@ def main():
         peft_config=peft_config
     )
 
-    # Trainer uses `prepare_model_for_kbit_training` to upcast all non-int8 params (layernorm, embedding and lm_head) to float32 
-    # just to have layernorm in float32 for stable qlora training. For mixed precion, we can safely downcast lm_head and embedding
-    # to save a lot of memory with same loss (atleast for Llama). Trainer do this for bf16 int4 qlora. We also do for fp16 int4 and int8:
+    # Trainer uses `prepare_model_for_kbit_training` to upcast all non-int8 params (layernorm, embedding and lm_head) to 
+    # float32 (except in fsdp/deepspeed case) just to have layernorm in float32 for stable qlora training. 
+    # For mixed precion, we can safely downcast lm_head and embedding to save a lot of memory with same loss (atleast for Llama). 
+    # Trainer do this for bf16 int4 qlora. We also do for fp16 int4 and int8:
 
     if (
         (sft_config.bf16 or sft_config.fp16)
