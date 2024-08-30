@@ -1,10 +1,14 @@
 # data_config
 dataset_mixer:
-  AI-MO/NuminaMath-CoT: 0.0001
-dataset_splits:
-- train
-- test
-chat_template: "{% for message in messages %}{% if (message['role'] == 'system')%}{{ '' }}{% elif (message['role'] == 'user')%}{{ '### Problem: ' + message['content'] + '\n' }}{% elif (message['role'] == 'assistant')%}{{ '### Solution: ' + message['content'] + '\n' }}{% endif %}{% if loop.last and message['role'] == 'user' and add_generation_prompt %}{{ '### Solution: ' }}{% endif %}{% endfor %}"
+  AI-MO/NuminaMath-CoT:
+    split: 
+      train: train[:2]
+      test: test[:2]
+    messages: messages
+
+task: sft
+
+chat_template: "{% for message in messages %}{% if (message['role'] == 'system')%}{{ message['content'] + '\n' }}{% elif (message['role'] == 'user')%}{{ '### Problem: ' + message['content'] + '\n' }}{% elif (message['role'] == 'assistant')%}{{ '### Solution: ' + message['content'] + '\n' }}{% endif %}{% if loop.last and message['role'] == 'user' and add_generation_prompt %}{{ '### Solution: ' }}{% endif %}{% endfor %}"
 
 # model_config
 model_name_or_path: deepseek-ai/deepseek-math-7b-base
@@ -25,15 +29,15 @@ output_dir: output
 overwrite_output_dir: true
 
 packing: true
-max_seq_length: 10
+max_seq_length: 5
 dataset_text_field: text
 
 do_train: true
-do_eval: false
+do_eval: true
 
-gradient_checkpointing: true
+gradient_checkpointing: false
 gradient_checkpointing_kwargs:
-  use_reentrant: True
+  use_reentrant: false
 
 gradient_accumulation_steps: 1
 per_device_train_batch_size: 1
@@ -57,7 +61,7 @@ log_level: info
 log_level_replica: warning
 
 eval_strategy: "no"
-eval_steps: 0.25
+eval_steps: 0.5
 
 push_to_hub: false
 hub_private_repo: true

@@ -1,101 +1,14 @@
-from datasets import DatasetDict, concatenate_datasets, load_dataset, load_from_disk
+from datasets import DatasetDict, concatenate_datasets, load_dataset, Dataset
 from ..configs import DataConfig
 from transformers import PreTrainedTokenizer, AutoTokenizer
 from trl import ModelConfig
-from typing import Literal
+from typing import Literal, Dict
+import logging
 
 
-COLUMNS_TO_KEEP = ["messages", "chosen", "rejected", "prompt", "completion", "label", "score"]
+logger = logging.getLogger(__name__) # controlled by parent
+
 DEFAULT_CHAT_TEMPLATE = "{% if not add_generation_prompt is defined %}{% set add_generation_prompt = false %}{% endif %}{% for message in messages %}{{'<|im_start|>' + message['role'] + '\n' + message['content'] + '<|im_end|>' + '\n'}}{% endfor %}{% if add_generation_prompt %}{{ '<|im_start|>assistant\n' }}{% endif %}"
-
-def get_datasets(
-    data_config: DataConfig
-) -> DatasetDict:
-    """
-    Loads one or more datasets with varying training set proportions.
-    
-    Args:
-        data_config (`DataConfig`):
-            Dataset configuration containing information about `dataset_mixer`, `dataset_split` and `shuffle`
-    Returns:
-        [`DatasetDict`]: The dataset dictionary containing the loaded datasets.
-    """
-    
-    raw_datasets = DatasetDict()
-    raw_train_datasets = []
-    raw_val_datasets = []
-    fracs = []
-
-    dataset_mixer = data_config.dataset_mixer
-    splits = data_config.dataset_splits
-    revision = "main"
-    subsample_seed = data_config.subsample_seed
-
-    for ds, frac_or_dict in dataset_mixer.items():
-
-        # get fracs of all the datasets
-        if isinstance(frac_or_dict, dict):
-            revision = frac_or_dict.get("revision", "main")  # default to main if no revision is specified
-            frac = frac_or_dict.get("fraction", 1.0)  # default to 1.0 if no fraction is specified
-        else:
-            frac = frac_or_dict
-        fracs.append(frac)
-
-        # get train and test splits of all the datasets
-        for split in splits:
-            if "train" in split:
-                if "data/" in ds:
-                    train_ds = load_from_disk(ds)[split]
-                else:
-                    train_ds = load_dataset(
-                        ds,
-                        split=split,
-                        revision=revision,
-                    )
-                train_ds = train_ds.remove_columns(
-                    [col for col in train_ds.column_names if col not in COLUMNS_TO_KEEP]
-                )
-                raw_train_datasets.append(train_ds)
-
-            elif "test" in split:
-                if "data/" in ds:
-                    val_ds = load_from_disk(ds)[split]
-                else:
-                    val_ds = load_dataset(
-                        ds,
-                        split=split,
-                        revision=revision,
-                    )
-                val_ds = val_ds.remove_columns(
-                    [col for col in val_ds.column_names if col not in COLUMNS_TO_KEEP]
-                )
-                raw_val_datasets.append(val_ds)
-            
-            else:
-                raise ValueError(f"Split type {split} not recognized as one of test or train.")
-        
-    if any(frac < 0 for frac in fracs):
-        raise ValueError("Dataset fractions cannot be negative.")
-    
-    # Apply subsampling on datasets, concatenate them and then shuffle. 
-    # No subsampling for test datasets to enable fair comparison across models
-    if len(raw_train_datasets) > 0:
-        train_subsets = []
-        for frac, train_ds in zip(fracs, raw_train_datasets):
-            train_subset = train_ds.shuffle(seed=subsample_seed).select(range(int(frac * len(train_ds))))
-            train_subsets.append(train_subset)
-        
-        raw_datasets["train"] = concatenate_datasets(train_subsets)
-
-    if len(raw_val_datasets) > 0:
-        raw_datasets["test"] = concatenate_datasets(raw_val_datasets) 
-    
-    if len(raw_datasets) == 0:
-        raise ValueError(
-            f"Dataset {dataset_mixer} not recognized with splits {splits}. Check the dataset has been correctly formatted."
-        )
-    
-    return raw_datasets
 
 
 def get_tokenizer(model_args: ModelConfig, data_args: DataConfig, set_pad_token: bool = True) -> PreTrainedTokenizer:
@@ -128,21 +41,222 @@ def get_tokenizer(model_args: ModelConfig, data_args: DataConfig, set_pad_token:
     return tokenizer
 
 
-def apply_chat_template(
-    example,
-    tokenizer: PreTrainedTokenizer,
-    task: Literal["sft", "generation"],
-):
-    if task in ["sft", "generation"]:
-        messages = example["messages"]
-        # We add an empty system message if there is none
-        if messages[0]["role"] != "system":
-            messages.insert(0, {"role": "system", "content": ""})
-        example["text"] = tokenizer.apply_chat_template(
-            messages, tokenize=False, add_generation_prompt=True if task == "generation" else False
-        )
-    else:
-        raise ValueError(
-            f"Task {task} not supported, please ensure that the provided task is one of {['sft', 'generation']}"
-        )
+def create_messages(example, query_col=None, response_col=None):
+    """
+    Create messages from query in `query_col` field, reponse in `response_col` field.
+    Output them in `messages` field.
+    """
+    messages = []
+    if query_col is not None:
+        messages.append({"role": "user", "content": example[query_col]})
+    if response_col is not None:
+        messages.append({"role": "assistant", "content": example[response_col]})
+    example["messages"] = messages
     return example
+
+
+def remove_last_assistant(example, messages_col):
+    """
+    If last message is assistant (during generation) then remove it and add its content to `references` field.
+    """
+    messages = example[messages_col]
+    if messages[-1]["role"] == "assistant":
+        assistant_message = messages.pop()
+        return {**example, "references": assistant_message["content"]}
+    return example
+
+
+def apply_chat_template(
+    example, 
+    tokenizer: PreTrainedTokenizer,
+    messages_col: str,
+    task: Literal["sft", "generation"] = "sft",
+    system_msg: str = None
+):
+    """
+    Use `tokenizer.chat_template` to convert messages given in `messages_col` of dataset into text. 
+    If `system_msg` is given then add system message in messages or override its content if already present.
+    If task is generation then add generation_prompt at end. Output text in `text` field of dataset
+    """
+    messages = example[messages_col]
+
+    if system_msg is not None:
+        if messages[0]["role"] == "system":
+            messages[0]["content"] = system_msg
+        else:
+            messages.insert(0, {"role": "system", "content": system_msg})
+
+    example["text"] = tokenizer.apply_chat_template(
+        messages, tokenize=False, add_generation_prompt=True if task == "generation" else False
+    )
+    return example
+
+
+def get_datasets(
+    data_config: DataConfig, 
+    tokenizer: PreTrainedTokenizer
+) -> Dict[str, DatasetDict]:
+    """
+    Generates datasets based on the provided data configuration and tokenizer.
+
+    Args:
+        data_config (DataConfig): A dataclass containing information about the dataset mixer and task. The `dataset_mixer`
+            should be defined in YAML format, with a structure like the following:
+
+            dataset_mixer:
+                AI-MO/NuminaMath-CoT:
+                    split: 
+                        train: train[:85]
+                        test: test[:50%]
+                    messages: messages
+                    system_msg: Solve MATH using COT
+                meta-math/MetaMathQA: 
+                    split:
+                        train: train[:1%]+train[-1%:]
+                    query: query
+                    response: response
+                ise-uiuc/Magicoder-Evol-Instruct-110K:
+                    split:
+                        train: train[:2%]
+                        test: train[-2%:]
+                    query: instruction
+                    response: response
+                    system_msg: Solve queries related to python
+
+            The `split` must be a dictionary with keys such as 'train' and 'test', and values that describe the data split 
+            (see https://huggingface.co/docs/datasets/v2.21.0/loading#slice-splits).
+
+            Provide either `messages` or both `query` and `response`. The `messages` field is useful when examples contain a 
+            complete chat sequence (e.g., query + response + query + ...). In such cases, the `messages` column is directly 
+            used. If only `query` and `response` are provided, it creates simple query-response examples.
+
+            If the task is generation, providing a `response` or the final assistant message in `messages` creates a new 
+            `references` column representing the expected generation output. This column is not created for other tasks.
+
+            The existing `messages` field in the dataset is modified by either overriding/adding a system prompt (if 
+            `system_msg` is specified in `dataset_mixer`) or by removing the last assistant message for generation tasks. 
+            The tokenizer's `chat_template` is applied to the resulting messages.
+
+        tokenizer (PreTrainedTokenizer): The tokenizer to use, which must have a defined `chat_template`. The `chat_template`
+            controls how messages are converted to text, so ensure `tokenizer.chat_template` is set up before use.
+
+    Returns:
+        Dict[str, DatasetDict]: A dictionary with dataset names as keys and `DatasetDict` objects containing train/test 
+        `Dataset` splits as values. 
+
+        Each split includes a new field `text`, which is generated by applying the tokenizer's `chat_template` to:
+        - For SFT (Supervised Fine-Tuning) tasks: concatenated sequences of `query` and `response` (or `query + response + ... + response` 
+          if derived from `messages`).
+        - For generation tasks: concatenated sequences of `query` (or `query + response + ... + query` if derived from `messages`).
+
+        Additionally, a `references` field is included in the splits only for generation tasks. This field contains the expected 
+        output based on the `response` or the final assistant message in the `messages`.
+
+    """
+    
+    raw_datasets = {}
+    for name, info in data_config.dataset_mixer.items():
+        
+        # Load DatasetDict according to specified split
+        split = info.get("split")
+        if split is None:
+            raise ValueError(f"`split` of dataset {name} is missing!")
+        if not isinstance(split, dict):
+            raise ValueError(f"`split` of dataset {name} must be a dict with keys in ['train', 'test']")
+        
+        logger.info(f"Loading Dataset: {name} with split {split}")
+        ds = load_dataset(name, split=split)
+
+        query_col = info.get("query")
+        response_col = info.get("response")
+        messages_col = info.get("messages")
+        system_msg = info.get("system_msg")
+        
+        task = data_config.task
+        if task == "sft":
+            # If messages are not present then create them from query and response and store them in "messages" field
+            if messages_col is None:
+                if query_col is None or response_col is None:
+                    raise ValueError(f"Must provide `messages` or both `query` and `response` for `sft` task")
+                logger.info(f"Creating messages from `{query_col}` and `{response_col}` fields of dataset: {name}")
+                ds = ds.map(create_messages, fn_kwargs={"query_col": query_col, "response_col": response_col})
+                messages_col = "messages"
+
+            # Apply chat template on messages
+            logger.info(f"Applying chat template on messages given in `{messages_col}` field of dataset: {name} into `text` field.")
+            ds = ds.map(apply_chat_template, fn_kwargs={"tokenizer": tokenizer, "messages_col": messages_col, "task": "sft", "system_msg": system_msg})
+        
+        elif task == "generation":
+            # If messages are not present then create them from query
+            if messages_col is None:
+                if query_col is None:
+                    raise ValueError(f"Must provide `messages` or `query` for `generation` task")
+                logger.info(f"Creating messages from `{query_col}` field of dataset: {name}")
+                ds = ds.map(create_messages, fn_kwargs={"query_col": query_col, "response_col": None})
+                messages_col = "messages"
+
+                # If response_col is given then It will be used as `references` 
+                if response_col is not None:
+                    logger.info(f"`{query_col}` of dataset {name} is renamed to `references`")
+                    ds = ds.rename_columns({response_col: "references"})
+
+            # elif they are present then remove the last assistant message if it exists. Provide last assistant_msg as `references`
+            else:
+                logger.info(f"Removing last assistant message from messages (if any) to `references` field of dataset: {name}")
+                ds = ds.map(remove_last_assistant, fn_kwargs={"messages_col": messages_col})
+
+            # Apply chat template on messages
+            logger.info(f"Applying chat template on messages given in `{messages_col}` field of dataset: {name} into `text` field.")
+            ds = ds.map(apply_chat_template, fn_kwargs={"tokenizer": tokenizer, "messages_col": messages_col, "task": "generation", "system_msg": system_msg})
+
+        else:
+            raise ValueError(f"Task {task} not supported, please ensure that the provided task is one of {['sft', 'generation']}")
+        
+        raw_datasets[name] = ds
+        
+    return raw_datasets
+
+
+def combine_datasets(
+    data_config: DataConfig, 
+    raw_datasets: Dict[str, DatasetDict]
+) -> DatasetDict:
+    """
+    Remove unnecassy columns from train and test datasets and combine them. 
+    For sft: {train: concat(all train splits), test: concat(all test splits)}
+    For generation: {name1: train + test split of name1, name2: train + test split of name2, ...}
+    """
+    task = data_config.task
+    train_datasets = []
+    test_datasets = []
+    allowed_cols = ["text", "references"] if task == "generation" else ["text"]
+    datasets_dict = DatasetDict()
+
+    for name, ds_dict in raw_datasets.items():
+        train_test_ds = []
+        if "train" in ds_dict:
+            train_ds = ds_dict["train"]
+            train_ds = train_ds.remove_columns([col for col in train_ds.column_names if col not in allowed_cols])
+            train_datasets.append(train_ds)
+            train_test_ds.append(train_ds)
+        if "test" in ds_dict:
+            test_ds = ds_dict["test"]
+            test_ds = test_ds.remove_columns([col for col in test_ds.column_names if col not in allowed_cols])
+            test_datasets.append(test_ds)
+            train_test_ds.append(test_ds)
+        
+        if task == "generation":
+            datasets_dict[name] = concatenate_datasets(train_test_ds)
+        
+    if task == "sft":
+        datasets_dict["train"] = concatenate_datasets(train_datasets) if len(train_datasets) > 0 else None
+        datasets_dict["test"] = concatenate_datasets(test_datasets) if len(test_datasets) > 0 else None
+    
+    return datasets_dict
+
+
+def prepare_datasets(data_config: DataConfig, tokenizer: PreTrainedTokenizer):
+    raw_datasets = get_datasets(data_config, tokenizer)
+    logger.info("Combining Datasets")
+    raw_datasets = combine_datasets(data_config, raw_datasets)
+    return raw_datasets

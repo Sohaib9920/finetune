@@ -8,11 +8,9 @@ import torch
 from transformers import HfArgumentParser, set_seed, AutoModelForCausalLM, AutoConfig
 from trl import ModelConfig, SFTTrainer, get_quantization_config, get_peft_config, get_kbit_device_map
 from src.configs import DataConfig, SFTConfig
-from peft import get_peft_model
 from src.utils import (
-    get_datasets,
+    prepare_datasets,
     get_tokenizer,
-    apply_chat_template,
     hf_login,
     setup_logging,
     init_wandb_training
@@ -23,7 +21,7 @@ logger = logging.getLogger(__name__) # globaly available logger of this module
 def main():
 
     parser = HfArgumentParser((DataConfig, ModelConfig, SFTConfig))
-    data_config, model_config, sft_config = parser.parse_yaml_file(sys.argv[1])
+    data_config, model_config, sft_config = parser.parse_yaml_file(sys.argv[1], allow_extra_keys=True)
 
     is_world_process_zero = sft_config.process_index == 0 # same as trainer do; get process_index of args.distributed_state (PartialState)
 
@@ -71,10 +69,9 @@ def main():
     #################
     # Prepare dataset
     #################
-    raw_datasets = get_datasets(data_config)
     tokenizer = get_tokenizer(model_config, data_config, set_pad_token=sft_config.packing) # safe to set pad=eos when packing
-    with sft_config.main_process_first(desc="Applying chat_template to `messages` column"):
-        raw_datasets = raw_datasets.map(apply_chat_template, fn_kwargs={"tokenizer": tokenizer, "task": "sft"})
+    with sft_config.main_process_first(desc="Preparing dataset"):
+        raw_datasets = prepare_datasets(data_config, tokenizer=tokenizer)
 
     train_dataset = raw_datasets.get("train")
     eval_dataset = raw_datasets.get("test")
@@ -123,7 +120,7 @@ def main():
 
     if sft_config.testing:
         config = AutoConfig.from_pretrained(model_config.model_name_or_path)
-        config.num_hidden_layers = 2
+        config.num_hidden_layers = 1
         model = AutoModelForCausalLM.from_config(config=config, torch_dtype=torch_dtype, attn_implementation=model_config.attn_implementation)
     else:
         model = AutoModelForCausalLM.from_pretrained(model_config.model_name_or_path, **model_kwargs) # download weights on main_procss, use cache for other
@@ -145,7 +142,7 @@ def main():
     # to save a lot of memory with same loss (atleast for Llama). Trainer do this for bf16 int4 qlora. We also do for fp16 int4 and int8:
 
     if (
-        sft_config.bf16 or sft_config.fp16
+        (sft_config.bf16 or sft_config.fp16)
         and (getattr(model, "is_loaded_in_4bit", False) or getattr(model, "is_loaded_in_4bit", False))
     ):
         dtype = torch.bfloat16 if sft_config.bf16 else torch.float16

@@ -24,4 +24,4 @@ class SFTConfig(trl.SFTConfig):
             )
         }
     )
-    testing: Optional[bool] = field(default=False, metadata={"help": "Whether to do testing using non-pretrained model with 2 layers"})
+    testing: Optional[bool] = field(default=False, metadata={"help": "Whether to do testing using non-pretrained model with 1 layers"})
