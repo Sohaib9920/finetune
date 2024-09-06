@@ -113,14 +113,15 @@ def main():
         trust_remote_code=model_config.trust_remote_code,
         attn_implementation=model_config.attn_implementation,
         torch_dtype=torch_dtype,
-        use_cache=False if sft_config.gradient_checkpointing else True,
+        use_cache=False,
         device_map=get_kbit_device_map() if quantization_config is not None else None,
         quantization_config=quantization_config,
     )
 
     if sft_config.testing:
         config = AutoConfig.from_pretrained(model_config.model_name_or_path)
-        config.num_hidden_layers = 1
+        config.num_hidden_layers = 2
+        config.hidden_size = 32
         model = AutoModelForCausalLM.from_config(config=config, torch_dtype=torch_dtype, attn_implementation=model_config.attn_implementation)
     else:
         model = AutoModelForCausalLM.from_pretrained(model_config.model_name_or_path, **model_kwargs) # download weights on main_procss, use cache for other
