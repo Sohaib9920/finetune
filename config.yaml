@@ -2,8 +2,8 @@
 dataset_mixer:
   AI-MO/NuminaMath-CoT:
     split: 
-      train: train[:2]
-      test: test[:2]
+      train: train[:100]
+      test: test
     messages: messages
 
 task: sft
