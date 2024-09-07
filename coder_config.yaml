@@ -1,0 +1,82 @@
+# data_config
+dataset_mixer:
+  Sohaib9920/code_tests:
+    split: 
+      train: train[:100]
+      test: test[:10]
+    query: code
+    response: unit_test
+
+task: sft
+
+chat_template: "{% for message in messages %}{% if (message['role'] == 'system')%}{{ message['content'] + '\n\n' }}{% elif (message['role'] == 'user')%}{{ 'Generate a unit test case for the following Java method:\n' + message['content'] + '\n\n' }}{% elif (message['role'] == 'assistant')%}{{ 'Unit test case:\n' + message['content'] + '\n\n' }}{% endif %}{% if loop.last and message['role'] == 'user' and add_generation_prompt %}{{ 'Unit test case:\n' }}{% endif %}{% endfor %}"
+
+# model_config
+model_name_or_path: deepseek-ai/deepseek-coder-1.3b-base
+torch_dtype: bfloat16
+model_revision: main
+trust_remote_code: true
+attn_implementation: eager
+
+load_in_4bit: false
+    
+use_peft: true
+lora_target_modules: all-linear
+lora_alpha: 8
+lora_r: 4
+
+# sft_config
+output_dir: output
+overwrite_output_dir: true
+
+packing: true
+max_seq_length: 5
+dataset_text_field: text
+
+do_train: true
+do_eval: true
+
+gradient_checkpointing: false
+gradient_checkpointing_kwargs:
+  use_reentrant: false
+
+gradient_accumulation_steps: 1
+per_device_train_batch_size: 1
+per_device_eval_batch_size: 1
+num_train_epochs: 1
+max_steps: 2
+
+fp16: false
+seed: 42
+bf16: true
+
+learning_rate: 5.0e-04
+lr_scheduler_type: constant
+warmup_ratio: 0.
+weight_decay: 0.
+
+report_to: none
+logging_strategy: steps
+logging_steps: 1
+log_level: info
+log_level_replica: warning
+
+eval_strategy: "no"
+eval_steps: 0.5
+
+push_to_hub: false
+hub_private_repo: true
+hub_strategy: every_save
+hub_model_id: dist_test_08
+
+save_strategy: "no"
+
+sdpa_kernel: mem
+
+wandb_config:
+  WANDB_PROJECT: "transformers"
+  WANDB_RUN_GROUP: "dist_testing"
+  WANDB_RUN_ID: "dist_test_08"
+  WANDB_TAGS: "sft" 
+
+testing: true

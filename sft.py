@@ -21,7 +21,7 @@ logger = logging.getLogger(__name__) # globaly available logger of this module
 def main():
 
     parser = HfArgumentParser((DataConfig, ModelConfig, SFTConfig))
-    data_config, model_config, sft_config = parser.parse_yaml_file(sys.argv[1], allow_extra_keys=True)
+    data_config, model_config, sft_config = parser.parse_yaml_file(sys.argv[1])
 
     is_world_process_zero = sft_config.process_index == 0 # same as trainer do; get process_index of args.distributed_state (PartialState)
 
