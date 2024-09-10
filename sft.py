@@ -12,7 +12,6 @@ from src.utils import (
     prepare_datasets,
     get_tokenizer,
     hf_login,
-    setup_logging,
     init_wandb_training
 )
 
@@ -23,7 +22,7 @@ def main():
     parser = HfArgumentParser((DataConfig, ModelConfig, SFTConfig))
     data_config, model_config, sft_config = parser.parse_yaml_file(sys.argv[1])
 
-    is_world_process_zero = sft_config.process_index == 0 # same as trainer do; get process_index of args.distributed_state (PartialState)
+    is_world_process_zero = sft_config.process_index == 0 # same as trainer do; get process_index of sft_config.distributed_state (PartialState)
 
     sdpa_kernel = sft_config.sdpa_kernel
     if sdpa_kernel is not None:
@@ -36,7 +35,13 @@ def main():
     ########
     # Setup
     ########
-    setup_logging(sft_config)
+    log_level = sft_config.get_process_log_level() 
+    logging.basicConfig(
+        format="[%(levelname)s|%(filename)s:%(lineno)s] %(asctime)s >> %(message)s", # explicit format
+        handlers=[logging.StreamHandler(sys.stdout)]
+    )
+    logger.setLevel(log_level)
+    logging.getLogger("src").setLevel(log_level)
 
     # Login to HuggingFace Hub if needed
     hf_login(required=(sft_config.push_to_hub is True))
@@ -105,7 +110,7 @@ def main():
 
     quantization_config = get_quantization_config(model_config) 
     # bnb_4bit_compute_dtype is same as torch_dtype for consistency with model weights
-    # bnb_4bit_quant_storage is same as torch_dtype for fsdp support
+    # bnb_4bit_quant_storage is same as torch_dtype for fsdp/deepspeed support
     peft_config = get_peft_config(model_config)
 
     model_kwargs = dict(
@@ -118,6 +123,7 @@ def main():
         quantization_config=quantization_config,
     )
 
+    logger.info("Loading Model")
     if sft_config.testing:
         config = AutoConfig.from_pretrained(model_config.model_name_or_path)
         config.num_hidden_layers = 2
@@ -160,13 +166,6 @@ def main():
 
     logger.info(f"Train Examples: {train_examples}")
     logger.info(f"Eval Examples: {eval_examples}")
-
-    # Collect parameter information
-    param_info = []
-    for name, param in trainer.model.named_parameters():
-        param_info.append([name, param.dtype, param.shape, param.requires_grad, param.__class__.__name__])
-    table = tabulate(param_info, headers=["Name", "Dtype", "Shape", "Requires Grad", "Class Name"], tablefmt="grid")
-    logger.info(f"Model Parameters info:\n{table}")
 
     if log_wandb:
         wandb.run.summary["train_examples"] = train_examples

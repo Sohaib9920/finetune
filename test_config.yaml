@@ -2,8 +2,8 @@
 dataset_mixer:
   AI-MO/NuminaMath-CoT:
     split: 
-      train: train[:100]
-      test: test
+      train: train[:4]
+      test: test[:4]
     messages: messages
 
 task: sft
@@ -29,7 +29,7 @@ output_dir: output
 overwrite_output_dir: true
 
 packing: true
-max_seq_length: 5
+max_seq_length: 100
 dataset_text_field: text
 
 do_train: true
@@ -43,7 +43,6 @@ gradient_accumulation_steps: 1
 per_device_train_batch_size: 1
 per_device_eval_batch_size: 1
 num_train_epochs: 1
-max_steps: 2
 
 fp16: false
 seed: 42
