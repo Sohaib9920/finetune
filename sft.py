@@ -38,7 +38,7 @@ def main():
     log_level = sft_config.get_process_log_level() 
     logging.basicConfig(
         format="[%(levelname)s|%(filename)s:%(lineno)s] %(asctime)s >> %(message)s", # explicit format
-        handlers=[logging.StreamHandler(sys.stdout)]
+        handlers=[logging.StreamHandler(sys.stdout)], force=True
     )
     logger.setLevel(log_level)
     logging.getLogger("src").setLevel(log_level)
