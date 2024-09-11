@@ -132,6 +132,12 @@ def main():
     else:
         model = AutoModelForCausalLM.from_pretrained(model_config.model_name_or_path, **model_kwargs) # download weights on main_procss, use cache for other
     
+    logger.warning(
+        f"[Process Rank: {sft_config.process_index}] - Model Device: {model.device}, "
+        f"Max Allocated Memory: {torch.cuda.max_memory_allocated() / (1024 ** 2):.2f} MB"
+        f"Max Reserved Memory: {torch.cuda.max_memory_reserved() / (1024 ** 2):.2f} MB"
+    )
+
     ########################
     # Initialize the Trainer
     ########################
@@ -170,6 +176,18 @@ def main():
     if log_wandb:
         wandb.run.summary["train_examples"] = train_examples
         wandb.run.summary["eval_examples"] = eval_examples
+    
+    logger.warning(
+        f"[Process Rank: {sft_config.process_index}] - Prepared Model Device: {model.device}, "
+        f"Max Allocated Memory: {torch.cuda.max_memory_allocated() / (1024 ** 2):.2f} MB"
+        f"Max Reserved Memory: {torch.cuda.max_memory_reserved() / (1024 ** 2):.2f} MB"
+    )
+
+    param_info = []
+    for name, param in trainer.model.named_parameters():
+        param_info.append([name, param.dtype, param.shape, param.requires_grad, param.__class__.__name__])
+    table = tabulate(param_info, headers=["Name", "Dtype", "Shape", "Requires Grad", "Class Name"], tablefmt="grid")
+    logger.info(f"Model Parameters info:\n{table}")
 
     ###############
     # Training loop
@@ -184,6 +202,12 @@ def main():
         trainer.save_metrics("train", metrics) # just save metrics to {split}.json and updated combined metrics to all_results.json on main_process
         # trainer has already logged the train_result.metrics to wandb as summary metrics 
     
+    logger.warning(
+        f"[Process Rank: {sft_config.process_index}] - "
+        f"Max Allocated Memory: {torch.cuda.max_memory_allocated() / (1024 ** 2):.2f} MB"
+        f"Max Reserved Memory: {torch.cuda.max_memory_reserved() / (1024 ** 2):.2f} MB"
+    )
+
     ##########
     # Evaluate
     ##########
