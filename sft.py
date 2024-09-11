@@ -134,7 +134,7 @@ def main():
     
     logger.warning(
         f"[Process Rank: {sft_config.process_index}] - Model Device: {model.device}, "
-        f"Max Allocated Memory: {torch.cuda.max_memory_allocated() / (1024 ** 2):.2f} MB"
+        f"Max Allocated Memory: {torch.cuda.max_memory_allocated() / (1024 ** 2):.2f} MB, "
         f"Max Reserved Memory: {torch.cuda.max_memory_reserved() / (1024 ** 2):.2f} MB"
     )
 
@@ -179,7 +179,7 @@ def main():
     
     logger.warning(
         f"[Process Rank: {sft_config.process_index}] - Prepared Model Device: {model.device}, "
-        f"Max Allocated Memory: {torch.cuda.max_memory_allocated() / (1024 ** 2):.2f} MB"
+        f"Max Allocated Memory: {torch.cuda.max_memory_allocated() / (1024 ** 2):.2f} MB, "
         f"Max Reserved Memory: {torch.cuda.max_memory_reserved() / (1024 ** 2):.2f} MB"
     )
 
@@ -187,7 +187,7 @@ def main():
     for name, param in trainer.model.named_parameters():
         param_info.append([name, param.dtype, param.shape, param.requires_grad, param.__class__.__name__])
     table = tabulate(param_info, headers=["Name", "Dtype", "Shape", "Requires Grad", "Class Name"], tablefmt="grid")
-    logger.info(f"Model Parameters info:\n{table}")
+    logger.warning(f"Model Parameters info:\n{table}")
 
     ###############
     # Training loop
@@ -204,7 +204,7 @@ def main():
     
     logger.warning(
         f"[Process Rank: {sft_config.process_index}] - "
-        f"Max Allocated Memory: {torch.cuda.max_memory_allocated() / (1024 ** 2):.2f} MB"
+        f"Max Allocated Memory: {torch.cuda.max_memory_allocated() / (1024 ** 2):.2f} MB, "
         f"Max Reserved Memory: {torch.cuda.max_memory_reserved() / (1024 ** 2):.2f} MB"
     )
 
