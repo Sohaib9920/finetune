@@ -157,7 +157,7 @@ def main():
 
     if (
         (sft_config.bf16 or sft_config.fp16)
-        and (getattr(model, "is_loaded_in_4bit", False) or getattr(model, "is_loaded_in_4bit", False))
+        and (getattr(model, "is_loaded_in_4bit", False) or getattr(model, "is_loaded_in_8bit", False))
     ):
         dtype = torch.bfloat16 if sft_config.bf16 else torch.float16
         for name, module in model.named_modules():
