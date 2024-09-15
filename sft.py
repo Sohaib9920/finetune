@@ -226,11 +226,5 @@ def main():
         # hub_model_id, all on main process
         trainer.push_to_hub(**kwargs)
 
-    else:
-        # Both run on main_process
-        trainer.save_model() 
-        trainer.create_model_card(**kwargs)
-        logger.info(f"Model saved to {sft_config.output_dir}")
-
 if __name__ == "__main__":
     main()
