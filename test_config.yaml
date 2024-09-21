@@ -6,8 +6,6 @@ dataset_mixer:
       test: test[:4]
     messages: messages
 
-task: sft
-
 chat_template: "{% for message in messages %}{% if (message['role'] == 'system')%}{{ message['content'] + '\n' }}{% elif (message['role'] == 'user')%}{{ '### Problem: ' + message['content'] + '\n' }}{% elif (message['role'] == 'assistant')%}{{ '### Solution: ' + message['content'] + '\n' }}{% endif %}{% if loop.last and message['role'] == 'user' and add_generation_prompt %}{{ '### Solution: ' }}{% endif %}{% endfor %}"
 
 # model_config

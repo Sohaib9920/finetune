@@ -7,8 +7,6 @@ dataset_mixer:
     query: code
     response: unit_test
 
-task: sft
-
 chat_template: "{% for message in messages %}{% if (message['role'] == 'system')%}{{ message['content'] + '\n\n' }}{% elif (message['role'] == 'user')%}{{ 'Generate a unit test case for the following Java method:\n' + message['content'] + '\n\n' }}{% elif (message['role'] == 'assistant')%}{{ 'Unit test case:\n' + message['content'] + '\n\n' }}{% endif %}{% if loop.last and message['role'] == 'user' and add_generation_prompt %}{{ 'Unit test case:\n' }}{% endif %}{% endfor %}"
 
 # model_config

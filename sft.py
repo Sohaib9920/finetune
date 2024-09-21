@@ -76,7 +76,7 @@ def main():
     #################
     tokenizer = get_tokenizer(model_config, data_config, set_pad_token=sft_config.packing) # safe to set pad=eos when packing
     with sft_config.main_process_first(desc="Preparing dataset"):
-        raw_datasets = prepare_datasets(data_config, tokenizer=tokenizer)
+        raw_datasets = prepare_datasets(dataset_mixer=data_config.dataset_mixer, tokenizer=tokenizer, task="sft")
 
     train_dataset = raw_datasets.get("train")
     eval_dataset = raw_datasets.get("test")
@@ -126,8 +126,8 @@ def main():
     logger.info("Loading Model")
     if sft_config.testing:
         config = AutoConfig.from_pretrained(model_config.model_name_or_path)
+        config.hidden_size = config.num_attention_heads * 2
         config.num_hidden_layers = 2
-        config.hidden_size = 32
         model = AutoModelForCausalLM.from_config(config=config, torch_dtype=torch_dtype, attn_implementation=model_config.attn_implementation)
     else:
         model = AutoModelForCausalLM.from_pretrained(model_config.model_name_or_path, **model_kwargs) # download weights on main_procss, use cache for other

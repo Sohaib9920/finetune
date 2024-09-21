@@ -8,8 +8,6 @@ class DataConfig:
         metadata={"help": "Check `get_datasets` doctring for more info"}
     )
 
-    task: Optional[str] = field(default="sft", metadata={"help": "Task to prepare data for"})
-
     truncation_side: Optional[str] = field(
         default=None, metadata={"help": "Truncation side to use for the tokenizer."}
     )

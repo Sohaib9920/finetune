@@ -93,17 +93,16 @@ def apply_chat_template(
 
 
 def get_datasets(
-    data_config: DataConfig, 
-    tokenizer: PreTrainedTokenizer
+    dataset_mixer: Dict, 
+    tokenizer: PreTrainedTokenizer,
+    task: Literal["sft", "generation"]
 ) -> Dict[str, DatasetDict]:
     """
     Generates datasets based on the provided data configuration and tokenizer.
 
     Args:
-        data_config (DataConfig): A dataclass containing information about the dataset mixer and task. The `dataset_mixer`
-            should be defined in YAML format, with a structure like the following:
+        dataset_mixer (Dict): It should have the following structure in YAML:
 
-            dataset_mixer:
                 AI-MO/NuminaMath-CoT:
                     split: 
                         train: train[:85]
@@ -139,6 +138,8 @@ def get_datasets(
 
         tokenizer (PreTrainedTokenizer): The tokenizer to use, which must have a defined `chat_template`. The `chat_template`
             controls how messages are converted to text, so ensure `tokenizer.chat_template` is set up before use.
+        
+        task (sft | generation): task for which dataset is task.
 
     Returns:
         Dict[str, DatasetDict]: A dictionary with dataset names as keys and `DatasetDict` objects containing train/test 
@@ -155,7 +156,7 @@ def get_datasets(
     """
     
     raw_datasets = {}
-    for name, info in data_config.dataset_mixer.items():
+    for name, info in dataset_mixer.items():
         
         # Load DatasetDict according to specified split
         split = info.get("split")
@@ -172,7 +173,7 @@ def get_datasets(
         messages_col = info.get("messages")
         system_msg = info.get("system_msg")
         
-        task = data_config.task
+        task = task
         if task == "sft":
             # If messages are not present then create them from query and response and store them in "messages" field
             if messages_col is None:
@@ -218,15 +219,14 @@ def get_datasets(
 
 
 def combine_datasets(
-    data_config: DataConfig, 
-    raw_datasets: Dict[str, DatasetDict]
+    raw_datasets: Dict[str, DatasetDict],
+    task: Literal["sft", "generation"]
 ) -> DatasetDict:
     """
     Remove unnecassy columns from train and test datasets and combine them. 
     For sft: {train: concat(all train splits), test: concat(all test splits)}
     For generation: {name1: train + test split of name1, name2: train + test split of name2, ...}
     """
-    task = data_config.task
     train_datasets = []
     test_datasets = []
     allowed_cols = ["text", "references"] if task == "generation" else ["text"]
@@ -236,14 +236,15 @@ def combine_datasets(
         train_test_ds = []
         if "train" in ds_dict:
             train_ds = ds_dict["train"]
+            train_test_ds.append(train_ds)
+            # only keep common columns between different datasets for proper concat later on
             train_ds = train_ds.remove_columns([col for col in train_ds.column_names if col not in allowed_cols])
             train_datasets.append(train_ds)
-            train_test_ds.append(train_ds)
         if "test" in ds_dict:
             test_ds = ds_dict["test"]
+            train_test_ds.append(test_ds)
             test_ds = test_ds.remove_columns([col for col in test_ds.column_names if col not in allowed_cols])
             test_datasets.append(test_ds)
-            train_test_ds.append(test_ds)
         
         if task == "generation":
             datasets_dict[name] = concatenate_datasets(train_test_ds)
@@ -255,8 +256,8 @@ def combine_datasets(
     return datasets_dict
 
 
-def prepare_datasets(data_config: DataConfig, tokenizer: PreTrainedTokenizer):
-    raw_datasets = get_datasets(data_config, tokenizer)
+def prepare_datasets(dataset_mixer: Dict, tokenizer: PreTrainedTokenizer, task: Literal["sft", "generation"]):
+    raw_datasets = get_datasets(dataset_mixer, tokenizer, task=task)
     logger.info("Combining Datasets")
-    raw_datasets = combine_datasets(data_config, raw_datasets)
+    raw_datasets = combine_datasets(raw_datasets, task=task)
     return raw_datasets
